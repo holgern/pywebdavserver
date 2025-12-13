@@ -6,10 +6,12 @@ pywebdavserver backend configurations.
 
 from __future__ import annotations
 
+import os
+import secrets
 from pathlib import Path
 from typing import Any, Literal
 
-from vaultconfig import ConfigManager, obscure
+from vaultconfig import ConfigManager, Obscurer, create_obscurer_from_hex
 
 # Backend types specific to pywebdavserver
 BackendType = Literal["local", "drime"]
@@ -17,22 +19,82 @@ BackendType = Literal["local", "drime"]
 # Configuration paths
 CONFIG_DIR = Path.home() / ".config" / "pywebdavserver"
 BACKENDS_FILE = CONFIG_DIR / "backends.toml"
+CIPHER_KEY_FILE = CONFIG_DIR / ".cipher_key"
+
+# Environment variables for custom cipher keys
+ENV_CIPHER_KEY = "PYWEBDAVSERVER_CIPHER_KEY"
+ENV_CIPHER_KEY_FILE = "PYWEBDAVSERVER_CIPHER_KEY_FILE"
+
+# Hardcoded custom cipher key for pywebdavserver
+# (generated using secrets.token_bytes(32))
+# This provides application-specific password obscuring (NOT encryption).
+# This key prevents casual viewing of passwords in config files but does not
+# provide real security. Anyone with this key can reveal obscured passwords.
+# For real encryption, use proper encryption mechanisms.
+PYWEBDAVSERVER_CIPHER_KEY = bytes.fromhex(
+    "9a6458e793a0bedbe5b78cd51e3aa7aef378d66628892a4dec618b57b8aab457"
+)
+
+
+def generate_cipher_key() -> bytes:
+    """Generate a cryptographically secure random 32-byte cipher key.
+
+    Returns:
+        32-byte cipher key
+    """
+    return secrets.token_bytes(32)
+
+
+def get_obscurer() -> Obscurer:
+    """Get obscurer instance with custom cipher key.
+
+    Priority:
+    1. ENV_CIPHER_KEY_FILE environment variable (path to key file)
+    2. ENV_CIPHER_KEY environment variable (hex key)
+    3. Hardcoded PYWEBDAVSERVER_CIPHER_KEY (default)
+
+    Returns:
+        Obscurer instance with custom cipher key
+    """
+    # Try environment variable pointing to key file
+    key_file_path = os.environ.get(ENV_CIPHER_KEY_FILE)
+    if key_file_path:
+        key_path = Path(key_file_path).expanduser()
+        if key_path.exists():
+            hex_key = key_path.read_text().strip()
+            return create_obscurer_from_hex(hex_key)
+
+    # Try environment variable with hex key directly
+    hex_key = os.environ.get(ENV_CIPHER_KEY)
+    if hex_key:
+        return create_obscurer_from_hex(hex_key)
+
+    # Use hardcoded cipher key (most secure - generated from secrets.token_bytes(32))
+    return Obscurer(cipher_key=PYWEBDAVSERVER_CIPHER_KEY)
 
 
 class BackendConfig:
     """Adapter for vaultconfig ConfigEntry to maintain backward compatibility."""
 
-    def __init__(self, name: str, backend_type: BackendType, config: dict[str, Any]):
+    def __init__(
+        self,
+        name: str,
+        backend_type: BackendType,
+        config: dict[str, Any],
+        obscurer: Obscurer | None = None,
+    ):
         """Initialize backend config.
 
         Args:
             name: Backend name
             backend_type: Backend type
             config: Configuration dict
+            obscurer: Custom obscurer for password reveal (optional)
         """
         self.name = name
         self.backend_type = backend_type
         self._config = config
+        self._obscurer = obscurer or get_obscurer()
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get configuration value.
@@ -46,10 +108,10 @@ class BackendConfig:
         """
         value = self._config.get(key, default)
 
-        # Reveal obscured passwords
+        # Reveal obscured passwords using custom obscurer
         if isinstance(value, str) and key in ("password", "api_key", "drime_password"):
             try:
-                return obscure.reveal(value)
+                return self._obscurer.reveal(value)
             except ValueError:
                 return value
 
@@ -69,7 +131,7 @@ class BackendConfig:
                 "drime_password",
             ):
                 try:
-                    result[key] = obscure.reveal(value)
+                    result[key] = self._obscurer.reveal(value)
                 except ValueError:
                     result[key] = value
             else:
@@ -80,18 +142,27 @@ class BackendConfig:
 class PyWebDAVConfigManager:
     """Adapter for vaultconfig ConfigManager for pywebdavserver backends."""
 
-    def __init__(self, config_file: Path = BACKENDS_FILE):
+    def __init__(
+        self, config_file: Path = BACKENDS_FILE, obscurer: Obscurer | None = None
+    ):
         """Initialize config manager.
 
         Args:
             config_file: Path to config file (for compatibility)
+            obscurer: Custom obscurer for password encryption (optional)
         """
         self.config_file = config_file
         self._config_dir = config_file.parent
 
-        # Use vaultconfig ConfigManager
+        # Get custom obscurer (will use env vars or generate new key)
+        self._obscurer = obscurer or get_obscurer()
+
+        # Use vaultconfig ConfigManager with custom obscurer
         self._manager = ConfigManager(
-            config_dir=self._config_dir, format="toml", password=None
+            config_dir=self._config_dir,
+            format="toml",
+            password=None,
+            obscurer=self._obscurer,
         )
 
     def list_backends(self) -> list[str]:
@@ -119,7 +190,7 @@ class PyWebDAVConfigManager:
         data = config_entry.get_all(reveal_secrets=False)
         backend_type = data.pop("type", "local")
 
-        return BackendConfig(name, backend_type, data)
+        return BackendConfig(name, backend_type, data, self._obscurer)
 
     def has_backend(self, name: str) -> bool:
         """Check if backend exists.
@@ -150,13 +221,13 @@ class PyWebDAVConfigManager:
         # Add type to config
         full_config = {"type": backend_type, **config}
 
-        # Manually obscure passwords since we don't use schema here
+        # Manually obscure passwords using custom obscurer
         if obscure_passwords:
             full_config = full_config.copy()
             for key in ("password", "api_key", "drime_password"):
                 if key in full_config and isinstance(full_config[key], str):
-                    if not obscure.is_obscured(full_config[key]):
-                        full_config[key] = obscure.obscure(full_config[key])
+                    if not self._obscurer.is_obscured(full_config[key]):
+                        full_config[key] = self._obscurer.obscure(full_config[key])
 
         self._manager.add_config(name, full_config, obscure_passwords=False)
 

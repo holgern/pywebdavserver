@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from wsgidav.dav_provider import DAVProvider  # type: ignore[import-untyped]
 
 
-class StorageProvider(ABC):
+class StorageProvider(ABC):  # noqa: B024
     """Abstract base class for WebDAV storage providers.
 
     This is a marker class that indicates a provider implementation

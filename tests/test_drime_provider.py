@@ -26,8 +26,12 @@ pytestmark = pytest.mark.skipif(not PYDRIME_AVAILABLE, reason="pydrime not insta
 
 # Import wsgidav in correct order to avoid circular import
 # WsgiDAVApp must be imported BEFORE dav_error
-from wsgidav.dav_error import HTTP_FORBIDDEN, HTTP_NOT_FOUND, DAVError  # noqa: F401
-from wsgidav.wsgidav_app import WsgiDAVApp  # noqa: F401
+from wsgidav.dav_error import (  # noqa: E402, F401
+    HTTP_FORBIDDEN,
+    HTTP_NOT_FOUND,
+    DAVError,
+)
+from wsgidav.wsgidav_app import WsgiDAVApp  # noqa: E402, F401
 
 
 class TestDrimeDAVProvider:

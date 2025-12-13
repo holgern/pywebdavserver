@@ -320,7 +320,8 @@ def config_reveal(obscured_password: str | None) -> None:
         revealed = reveal(obscured_password)
         console.print(f"\nRevealed password: [red]{revealed}[/red]")
         console.print(
-            "\n[yellow]Warning: This password is now visible in your terminal history.[/yellow]"
+            "\n[yellow]Warning: This password is now visible in your "
+            "terminal history.[/yellow]"
         )
     except Exception as e:
         console.print(f"[red]Error revealing password: {e}[/red]")

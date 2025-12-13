@@ -28,7 +28,7 @@ class TestLocalStorageProvider:
         from pywebdavserver.providers.local import LocalStorageProvider
 
         new_path = self.root_path / "new_webdav"
-        provider = LocalStorageProvider(str(new_path))
+        _ = LocalStorageProvider(str(new_path))
 
         assert new_path.exists()
         assert new_path.is_dir()

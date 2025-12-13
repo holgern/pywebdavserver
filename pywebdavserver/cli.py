@@ -168,12 +168,14 @@ def cli(
         password = None
     elif username and not password:
         console.print(
-            "[yellow]Warning: Username provided but no password. Using anonymous access.[/yellow]"
+            "[yellow]Warning: Username provided but no password. "
+            "Using anonymous access.[/yellow]"
         )
         username = None
     elif not username and password:
         console.print(
-            "[yellow]Warning: Password provided but no username. Using anonymous access.[/yellow]"
+            "[yellow]Warning: Password provided but no username. "
+            "Using anonymous access.[/yellow]"
         )
         password = None
 
@@ -249,7 +251,8 @@ def _start_from_config(
                 from .providers.drime import DrimeDAVProvider
             except ImportError:
                 console.print(
-                    "[red]Error: Drime backend requires pydrime to be installed.[/red]\n"
+                    "[red]Error: Drime backend requires pydrime to be "
+                    "installed.[/red]\n"
                     "Install it with: pip install 'pywebdavserver[drime]'"
                 )
                 sys.exit(1)
@@ -269,7 +272,8 @@ def _start_from_config(
                 sys.exit(1)
 
             console.print(
-                f"[blue]Connecting to Drime Cloud (workspace: {workspace_id_config})...[/blue]"
+                f"[blue]Connecting to Drime Cloud "
+                f"(workspace: {workspace_id_config})...[/blue]"
             )
             client = DrimeClient(api_key=api_key)
 
@@ -280,7 +284,10 @@ def _start_from_config(
                 cache_ttl=cache_ttl,
                 max_file_size=max_file_size,
             )
-            server_name = f"PyWebDAV Server ({backend_config.name}: workspace {workspace_id_config})"
+            server_name = (
+                f"PyWebDAV Server ({backend_config.name}: "
+                f"workspace {workspace_id_config})"
+            )
 
         else:
             console.print(f"[red]Error: Unknown backend type '{backend_type}'[/red]")
@@ -366,7 +373,8 @@ def _start_from_type(
                 from .providers.drime import DrimeDAVProvider
             except ImportError:
                 console.print(
-                    "[red]Error: Drime backend requires pydrime to be installed.[/red]\n"
+                    "[red]Error: Drime backend requires pydrime to be "
+                    "installed.[/red]\n"
                     "Install it with: pip install 'pywebdavserver[drime]'"
                 )
                 sys.exit(1)
@@ -376,7 +384,8 @@ def _start_from_type(
 
             if not api_key:
                 console.print(
-                    "[red]Error: Drime backend requires DRIME_API_KEY environment variable.[/red]\n"
+                    "[red]Error: Drime backend requires DRIME_API_KEY "
+                    "environment variable.[/red]\n"
                     "Set it with:\n"
                     "  export DRIME_API_KEY='your-api-key'\n\n"
                     "Or configure a named backend:\n"
@@ -445,7 +454,7 @@ def _start_from_type(
 
 
 # Import and register config subcommand
-from .cli_config import config_group
+from .cli_config import config_group  # noqa: E402
 
 cli.add_command(config_group)
 
