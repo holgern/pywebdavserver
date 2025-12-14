@@ -26,6 +26,19 @@ logger = logging.getLogger(__name__)
 
 @click.group(invoke_without_command=True)
 @click.pass_context
+@click.version_option()
+def cli(ctx: click.Context) -> None:
+    """PyWebDAV Server - WebDAV server with pluggable storage backends.
+
+    Run 'pywebdavserver serve' to start the server.
+    Run 'pywebdavserver config' for configuration management.
+    """
+    # If no subcommand, show help
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@cli.command()
 @click.option(
     "--backend",
     help="Backend name from config or backend type (local/drime)",
@@ -101,9 +114,12 @@ logger = logging.getLogger(__name__)
     default=False,
     help="Disable authentication (allow anonymous access)",
 )
-@click.version_option()
-def cli(
-    ctx: click.Context,
+@click.option(
+    "--backend-config",
+    default=None,
+    help="backend configuration name (from config file)",
+)
+def serve(
     backend: str | None,
     path: str,
     host: str,
@@ -118,33 +134,25 @@ def cli(
     ssl_key: str | None,
     verbose: int,
     no_auth: bool,
+    backend_config: str | None,
 ) -> None:
-    """PyWebDAV Server - WebDAV server with pluggable storage backends.
-
-    Supports local filesystem and Drime Cloud storage backends with
-    named backend configurations for easy management.
+    """Start the WebDAV server.
 
     \b
     Examples:
         # Start with a configured backend
-        pywebdavserver --backend drime-personal
+        pywebdavserver serve --backend-config drime-personal
 
         # Start with local filesystem backend (anonymous access)
-        pywebdavserver --backend local --no-auth
+        pywebdavserver serve --backend local --no-auth
 
         # Start with Drime Cloud backend (legacy env vars)
-        export DRIME_EMAIL="user@example.com"
-        export DRIME_PASSWORD="password"
-        pywebdavserver --backend drime --workspace-id 0 --no-auth
+        export DRIME_API_KEY="your-api-key"
+        pywebdavserver serve --backend drime --workspace-id 0 --no-auth
 
         # Manage backend configurations
-        pywebdavserver config add drime-work
-        pywebdavserver config list
+        pywebdavserver config
     """
-    # If a subcommand is invoked, don't start the server
-    if ctx.invoked_subcommand is not None:
-        return
-
     # Default backend if not specified
     if backend is None:
         backend = "local"
@@ -179,15 +187,22 @@ def cli(
         )
         password = None
 
-    # Check if backend is a named config
-    config_manager = get_config_manager()
-    backend_config = config_manager.get_backend(backend)
-
+    # Check if backend_config is specified
     if backend_config:
+        config_manager = get_config_manager()
+        backend_cfg = config_manager.get_backend(backend_config)
+
+        if not backend_cfg:
+            console.print(f"[red]Backend config '{backend_config}' not found.[/red]")
+            console.print("Available backends:")
+            for name in config_manager.list_backends():
+                console.print(f"  - {name}")
+            sys.exit(1)
+
         # Use configured backend
-        console.print(f"[blue]Loading backend '{backend}' from config...[/blue]")
+        console.print(f"[blue]Loading backend '{backend_config}' from config...[/blue]")
         _start_from_config(
-            backend_config=backend_config,
+            backend_config=backend_cfg,
             host=host,
             port=port,
             username=username,
@@ -197,22 +212,40 @@ def cli(
             verbose=verbose,
         )
     else:
-        # Legacy mode: backend is a type (local/drime)
-        _start_from_type(
-            backend_type=backend,
-            path=path,
-            host=host,
-            port=port,
-            username=username,
-            password=password,
-            readonly=readonly,
-            cache_ttl=cache_ttl,
-            max_file_size=max_file_size,
-            workspace_id=workspace_id,
-            ssl_cert=ssl_cert,
-            ssl_key=ssl_key,
-            verbose=verbose,
-        )
+        # Check if backend is a named config (for backwards compatibility)
+        config_manager = get_config_manager()
+        backend_cfg = config_manager.get_backend(backend)
+
+        if backend_cfg:
+            # Use configured backend
+            console.print(f"[blue]Loading backend '{backend}' from config...[/blue]")
+            _start_from_config(
+                backend_config=backend_cfg,
+                host=host,
+                port=port,
+                username=username,
+                password=password,
+                ssl_cert=ssl_cert,
+                ssl_key=ssl_key,
+                verbose=verbose,
+            )
+        else:
+            # Legacy mode: backend is a type (local/drime)
+            _start_from_type(
+                backend_type=backend,
+                path=path,
+                host=host,
+                port=port,
+                username=username,
+                password=password,
+                readonly=readonly,
+                cache_ttl=cache_ttl,
+                max_file_size=max_file_size,
+                workspace_id=workspace_id,
+                ssl_cert=ssl_cert,
+                ssl_key=ssl_key,
+                verbose=verbose,
+            )
 
 
 def _start_from_config(
@@ -453,10 +486,270 @@ def _start_from_type(
         sys.exit(1)
 
 
-# Import and register config subcommand
-from .cli_config import config_group  # noqa: E402
+@cli.command()
+def config() -> None:
+    """Enter an interactive configuration session.
 
-cli.add_command(config_group)
+    Allows you to manage backend configurations interactively.
+    """
+    config_manager = get_config_manager()
+
+    console.print("\n[bold cyan]PyWebDAV Server Configuration Manager[/bold cyan]\n")
+
+    while True:
+        console.print("[bold]Available commands:[/bold]")
+        console.print("  1. List backends")
+        console.print("  2. Add backend")
+        console.print("  3. Show backend")
+        console.print("  4. Remove backend")
+        console.print("  5. Exit")
+
+        choice = click.prompt("\nEnter choice", type=int, default=5)
+
+        if choice == 1:
+            # List backends
+            backends = config_manager.list_backends()
+            if not backends:
+                console.print("\n[yellow]No backends configured[/yellow]\n")
+            else:
+                console.print("\n[bold]Configured backends:[/bold]")
+                for name in backends:
+                    backend = config_manager.get_backend(name)
+                    if backend:
+                        console.print(f"  • {name} ({backend.backend_type})")
+                console.print()
+
+        elif choice == 2:
+            # Add backend
+            console.print("\n[bold]Add new backend[/bold]")
+            name = click.prompt("Backend name")
+            backend_type = click.prompt(
+                "Backend type", type=click.Choice(["local", "drime"])
+            )
+
+            config_data: dict[str, Any] = {}
+
+            if backend_type == "local":
+                path = click.prompt("Root directory path", default=DEFAULT_PATH)
+                readonly = click.confirm("Read-only mode?", default=False)
+                config_data["path"] = path
+                config_data["readonly"] = readonly
+
+            elif backend_type == "drime":
+                console.print("\nYou'll need a Drime API key. Get one from:")
+                console.print("  https://app.drime.cloud/settings/api-keys")
+                console.print()
+                api_key = click.prompt("Drime API key", hide_input=True)
+                workspace_id = click.prompt(
+                    "Workspace ID (0 for personal)", type=int, default=0
+                )
+                readonly = click.confirm("Read-only mode?", default=False)
+                cache_ttl = click.prompt(
+                    "Cache TTL (seconds)", type=float, default=DEFAULT_CACHE_TTL
+                )
+                max_file_size = click.prompt(
+                    "Max file size (MB)",
+                    type=int,
+                    default=DEFAULT_MAX_FILE_SIZE // (1024 * 1024),
+                )
+                config_data["api_key"] = api_key
+                config_data["workspace_id"] = workspace_id
+                config_data["readonly"] = readonly
+                config_data["cache_ttl"] = cache_ttl
+                config_data["max_file_size"] = max_file_size * 1024 * 1024
+
+            config_manager.add_backend(
+                name, backend_type, config_data, obscure_passwords=True
+            )
+            console.print(f"\n[green]✓[/green] Backend '{name}' added successfully\n")
+
+        elif choice == 3:
+            # Show backend
+            name = click.prompt("\nBackend name")
+            backend = config_manager.get_backend(name)
+
+            if not backend:
+                console.print(f"\n[red]Error:[/red] Backend '{name}' not found\n")
+            else:
+                console.print(f"\n[bold]Backend: {name}[/bold]")
+                console.print(f"Type: {backend.backend_type}")
+                console.print("\nConfiguration:")
+                config_data = backend.get_all()
+                for key, value in config_data.items():
+                    # Hide sensitive values
+                    if key in ("api_key", "password"):
+                        console.print(f"  {key}: [dim]<hidden>[/dim]")
+                    else:
+                        console.print(f"  {key}: {value}")
+                console.print()
+
+        elif choice == 4:
+            # Remove backend
+            name = click.prompt("\nBackend name")
+            if config_manager.has_backend(name):
+                if click.confirm(f"Remove backend '{name}'?"):
+                    config_manager.remove_backend(name)
+                    console.print(f"\n[green]✓[/green] Backend '{name}' removed\n")
+            else:
+                console.print(f"\n[red]Error:[/red] Backend '{name}' not found\n")
+
+        elif choice == 5:
+            console.print("\nExiting configuration manager.\n")
+            break
+
+
+@cli.command(name="obscure")
+@click.argument("password", required=False)
+def obscure_cmd(password: str | None) -> None:
+    """Obscure a password for use in the pywebdavserver config file.
+
+    If PASSWORD is not provided, will prompt for it interactively.
+    """
+    # Import inside function to avoid issues
+    import pywebdavserver.obscure as obscure_module
+
+    if not obscure_module.HAS_CRYPTOGRAPHY:
+        console.print(
+            "[red]Error: Password obscuring requires the 'cryptography' library.[/red]"
+        )
+        console.print("Install it with: [cyan]pip install cryptography[/cyan]")
+        sys.exit(1)
+
+    if password is None:
+        password = click.prompt("Enter password to obscure", hide_input=True)
+
+    if not password:
+        console.print("[red]Error: Password cannot be empty[/red]")
+        sys.exit(1)
+
+    obscured = obscure_module.obscure(password)
+    console.print(f"\n[green]Obscured password:[/green] {obscured}")
+    console.print("\n[yellow]Note:[/yellow] This can be used in the config file.")
+    console.print(
+        "The password will be automatically revealed when the config is loaded."
+    )
+
+
+# Add 'server' as an alias for 'serve' for compatibility
+@cli.command(name="server")
+@click.option(
+    "--backend",
+    help="Backend name from config or backend type (local/drime)",
+)
+@click.option(
+    "--path",
+    type=click.Path(),
+    default=DEFAULT_PATH,
+    help=f"Root directory path for local backend (default: {DEFAULT_PATH})",
+)
+@click.option(
+    "--host",
+    default=DEFAULT_HOST,
+    help=f"Host address to bind to (default: {DEFAULT_HOST})",
+)
+@click.option(
+    "--port",
+    type=int,
+    default=DEFAULT_PORT,
+    help=f"Port number to listen on (default: {DEFAULT_PORT})",
+)
+@click.option(
+    "--username",
+    help="WebDAV username for authentication (omit for anonymous access)",
+)
+@click.option(
+    "--password",
+    help="WebDAV password for authentication",
+)
+@click.option(
+    "--readonly",
+    is_flag=True,
+    default=False,
+    help="Enable read-only mode (no writes allowed)",
+)
+@click.option(
+    "--cache-ttl",
+    type=float,
+    default=DEFAULT_CACHE_TTL,
+    help=f"Cache TTL in seconds for Drime backend (default: {DEFAULT_CACHE_TTL})",
+)
+@click.option(
+    "--max-file-size",
+    type=int,
+    default=DEFAULT_MAX_FILE_SIZE,
+    help=f"Maximum file size in bytes (default: {DEFAULT_MAX_FILE_SIZE})",
+)
+@click.option(
+    "--workspace-id",
+    type=int,
+    default=0,
+    help="Workspace ID for Drime backend (0 = personal, default: 0)",
+)
+@click.option(
+    "--ssl-cert",
+    type=click.Path(exists=True),
+    help="Path to SSL certificate file (for HTTPS)",
+)
+@click.option(
+    "--ssl-key",
+    type=click.Path(exists=True),
+    help="Path to SSL private key file (for HTTPS)",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    count=True,
+    help="Increase verbosity (can be repeated: -v, -vv, -vvv, etc.)",
+)
+@click.option(
+    "--no-auth",
+    is_flag=True,
+    default=False,
+    help="Disable authentication (allow anonymous access)",
+)
+@click.option(
+    "--backend-config",
+    default=None,
+    help="backend configuration name (from config file)",
+)
+def server(
+    backend: str | None,
+    path: str,
+    host: str,
+    port: int,
+    username: str | None,
+    password: str | None,
+    readonly: bool,
+    cache_ttl: float,
+    max_file_size: int,
+    workspace_id: int,
+    ssl_cert: str | None,
+    ssl_key: str | None,
+    verbose: int,
+    no_auth: bool,
+    backend_config: str | None,
+) -> None:
+    """Start the WebDAV server (alias for 'serve')."""
+    # Just call serve with the same parameters
+    ctx = click.get_current_context()
+    ctx.invoke(
+        serve,
+        backend=backend,
+        path=path,
+        host=host,
+        port=port,
+        username=username,
+        password=password,
+        readonly=readonly,
+        cache_ttl=cache_ttl,
+        max_file_size=max_file_size,
+        workspace_id=workspace_id,
+        ssl_cert=ssl_cert,
+        ssl_key=ssl_key,
+        verbose=verbose,
+        no_auth=no_auth,
+        backend_config=backend_config,
+    )
 
 
 # For backwards compatibility with existing entry point
