@@ -2,6 +2,7 @@
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pywebdavserver)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/pywebdavserver)
 [![codecov](https://codecov.io/gh/holgern/pywebdavserver/graph/badge.svg?token=iCHXwbjAXG)](https://codecov.io/gh/holgern/pywebdavserver)
+
 # pywebdavserver
 
 A WebDAV server with pluggable storage backends - support for local filesystem and Drime
