@@ -16,10 +16,6 @@ from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-# Import wsgidav in correct order to avoid circular import
-# WsgiDAVApp must be imported BEFORE dav_error
-from wsgidav.wsgidav_app import WsgiDAVApp  # noqa: F401  # type: ignore[import-untyped]
-
 from wsgidav.dav_error import (  # type: ignore[import-untyped]
     HTTP_FORBIDDEN,
     HTTP_NOT_FOUND,
@@ -30,6 +26,10 @@ from wsgidav.dav_provider import (  # type: ignore[import-untyped]
     DAVNonCollection,
     DAVProvider,
 )
+
+# Import wsgidav in correct order to avoid circular import
+# WsgiDAVApp must be imported BEFORE dav_error
+from wsgidav.wsgidav_app import WsgiDAVApp  # noqa: F401  # type: ignore[import-untyped]
 
 if TYPE_CHECKING:
     from pydrime.api import DrimeClient
@@ -270,8 +270,11 @@ class DrimeResource(DAVNonCollection):
                 error_str = str(delete_error)
                 if "500" in error_str or "404" in error_str:
                     logger.warning(
-                        f"API error deleting file {self.path} (entry_id={entry_id}): {delete_error}. "
-                        "This might be an eventual consistency issue. Treating as deleted."
+                        f"API error deleting file {self.path} "
+                        f"(entry_id={entry_id}): {delete_error}. "
+                        "This might be an eventual consistency issue. "
+                        "Treating as deleted."
+                        "Treating as deleted."
                     )
                     # Treat as successfully deleted for eventual consistency
                     if self._provider is not None:
@@ -286,7 +289,8 @@ class DrimeResource(DAVNonCollection):
 
         except Exception as e:
             logger.error(
-                f"Error deleting file: {e} (entry_id={entry_id if 'entry_id' in locals() else 'unknown'}, "
+                f"Error deleting file: {e} "
+                f"(entry_id={entry_id if 'entry_id' in locals() else 'unknown'}, "
                 f"name={self.file_entry.name}, path={self.path})"
             )
             raise DAVError(HTTP_FORBIDDEN, f"Error deleting file: {e}") from None
@@ -1217,8 +1221,10 @@ class DrimeCollection(DAVCollection):
                 error_str = str(delete_error)
                 if "500" in error_str or "404" in error_str:
                     logger.warning(
-                        f"API error deleting folder {self.path} (entry_id={entry_id}): {delete_error}. "
-                        "This might be an eventual consistency issue. Treating as deleted."
+                        f"API error deleting folder {self.path} "
+                        f"(entry_id={entry_id}): {delete_error}. "
+                        "This might be an eventual consistency issue. "
+                        "Treating as deleted."
                     )
                     # Treat as successfully deleted for eventual consistency
                     if self._provider is not None:
@@ -1233,8 +1239,10 @@ class DrimeCollection(DAVCollection):
 
         except Exception as e:
             logger.error(
-                f"Error deleting folder: {e} (entry_id={entry_id if 'entry_id' in locals() else 'unknown'}, "
-                f"name={self.folder_entry.name if self.folder_entry else 'ROOT'}, path={self.path})"
+                f"Error deleting folder: {e} "
+                f"(entry_id={entry_id if 'entry_id' in locals() else 'unknown'}, "
+                f"name={self.folder_entry.name if self.folder_entry else 'ROOT'}, "
+                f"path={self.path})"
             )
             raise DAVError(HTTP_FORBIDDEN, f"Error deleting folder: {e}") from None
 
@@ -1774,8 +1782,8 @@ class DrimeDAVProvider(DAVProvider, StorageProvider):
             readonly: Whether to allow write operations
             cache_ttl: Cache time-to-live in seconds
             max_file_size: Maximum file size for uploads/downloads in bytes
-            delete_forever: Whether to permanently delete files (True) or move to trash (False).
-                Default is True for WebDAV compatibility.
+            delete_forever: Whether to permanently delete files (True) or move
+                to trash (False). Default is True for WebDAV compatibility.
         """
         super().__init__()
         self.client = client
