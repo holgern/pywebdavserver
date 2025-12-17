@@ -16,6 +16,15 @@ from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+
+# ruff: noqa: I001
+# isort: skip_file
+# Import wsgidav in correct order to avoid circular import
+# WsgiDAVApp must be imported BEFORE dav_error
+
+# Import wsgidav in correct order to avoid circular import
+# WsgiDAVApp must be imported BEFORE dav_error
+from wsgidav.wsgidav_app import WsgiDAVApp  # noqa: F401  # type: ignore[import-untyped]
 from wsgidav.dav_error import (  # type: ignore[import-untyped]
     HTTP_FORBIDDEN,
     HTTP_NOT_FOUND,
@@ -26,10 +35,6 @@ from wsgidav.dav_provider import (  # type: ignore[import-untyped]
     DAVNonCollection,
     DAVProvider,
 )
-
-# Import wsgidav in correct order to avoid circular import
-# WsgiDAVApp must be imported BEFORE dav_error
-from wsgidav.wsgidav_app import WsgiDAVApp  # noqa: F401  # type: ignore[import-untyped]
 
 if TYPE_CHECKING:
     from pydrime.api import DrimeClient
@@ -273,7 +278,6 @@ class DrimeResource(DAVNonCollection):
                         f"API error deleting file {self.path} "
                         f"(entry_id={entry_id}): {delete_error}. "
                         "This might be an eventual consistency issue. "
-                        "Treating as deleted."
                         "Treating as deleted."
                     )
                     # Treat as successfully deleted for eventual consistency
@@ -603,14 +607,12 @@ class DrimeResource(DAVNonCollection):
                     logger.info(
                         f"DrimeResource.handle_copy: Deleted collection {dest_path}"
                     )
-                except DAVError as e:
-                    logger.error(
-                        f"DrimeResource.handle_copy: Error deleting collection: {e}"
-                    )
-                    return [(dest_path, e)]
                 except Exception as e:
-                    logger.error(f"DrimeResource.handle_copy: Exception deleting: {e}")
-                    return [(dest_path, DAVError(HTTP_FORBIDDEN, str(e)))]
+                    logger.warning(
+                        f"DrimeResource.handle_copy: Failed to delete destination "
+                        f"{dest_path}: {e}. Continuing with copy anyway."
+                    )
+                    # Continue anyway - the copy might still succeed
 
         # Now do the actual copy
         # If we deleted a collection, we want to create a FILE at that location,
@@ -681,12 +683,12 @@ class DrimeResource(DAVNonCollection):
                 try:
                     dest_res.delete()
                     logger.info(f"DrimeResource.handle_move: Deleted {dest_path}")
-                except DAVError as e:
-                    logger.error(f"DrimeResource.handle_move: Error deleting: {e}")
-                    return [(dest_path, e)]
                 except Exception as e:
-                    logger.error(f"DrimeResource.handle_move: Exception deleting: {e}")
-                    return [(dest_path, DAVError(HTTP_FORBIDDEN, str(e)))]
+                    logger.warning(
+                        f"DrimeResource.handle_move: Failed to delete destination "
+                        f"{dest_path}: {e}. Continuing with move anyway."
+                    )
+                    # Continue anyway - the move might still succeed
 
         # If we deleted a collection and dest ends with /, strip it
         # (we want to create a file at that location, not inside it)
@@ -1616,7 +1618,15 @@ class DrimeCollection(DAVCollection):
                 )
                 if dest_res is not None:
                     # Delete the destination first
-                    dest_res.delete()
+                    try:
+                        dest_res.delete()
+                    except Exception as delete_error:
+                        logger.warning(
+                            f"DrimeCollection.handle_copy: Failed to delete "
+                            f"destination {dest_path_clean}: {delete_error}. "
+                            "Continuing with copy anyway."
+                        )
+                        # Continue anyway - the duplicate API might handle overwrite
 
             # Find the destination parent folder
             dest_parent_id: int | None = None
@@ -1678,7 +1688,15 @@ class DrimeCollection(DAVCollection):
                     logger.debug(
                         f"DrimeCollection.handle_move: Deleting dest {dest_path}"
                     )
-                    dest_res.delete()
+                    try:
+                        dest_res.delete()
+                    except Exception as delete_error:
+                        logger.warning(
+                            f"DrimeCollection.handle_move: Failed to delete "
+                            f"destination {dest_path}: {delete_error}. "
+                            "Continuing with move anyway."
+                        )
+                        # Continue anyway
 
             # Use copy_move_single which already handles the move
             self.copy_move_single(dest_path, is_move=True)
