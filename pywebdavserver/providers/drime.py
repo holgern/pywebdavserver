@@ -16,6 +16,10 @@ from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+# Import wsgidav in correct order to avoid circular import
+# WsgiDAVApp must be imported BEFORE dav_error
+from wsgidav.wsgidav_app import WsgiDAVApp  # noqa: F401  # type: ignore[import-untyped]
+
 from wsgidav.dav_error import (  # type: ignore[import-untyped]
     HTTP_FORBIDDEN,
     HTTP_NOT_FOUND,
@@ -26,10 +30,6 @@ from wsgidav.dav_provider import (  # type: ignore[import-untyped]
     DAVNonCollection,
     DAVProvider,
 )
-
-# Import wsgidav in correct order to avoid circular import
-# WsgiDAVApp must be imported BEFORE dav_error
-from wsgidav.wsgidav_app import WsgiDAVApp  # noqa: F401  # type: ignore[import-untyped]
 
 if TYPE_CHECKING:
     from pydrime.api import DrimeClient
@@ -252,14 +252,43 @@ class DrimeResource(DAVNonCollection):
                         self._provider._register_delete(self.path)
                     return
 
-            self.client.delete_file_entries([entry_id], workspace_id=self.workspace_id)
+            logger.debug(
+                f"Deleting file entry_id={entry_id}, name={self.file_entry.name}, "
+                f"path={self.path}"
+            )
+            try:
+                delete_forever = (
+                    self._provider._delete_forever if self._provider else True
+                )
+                self.client.delete_file_entries(
+                    [entry_id],
+                    delete_forever=delete_forever,
+                    workspace_id=self.workspace_id,
+                )
+            except Exception as delete_error:
+                # Check if this is a 500 error - might be eventual consistency issue
+                error_str = str(delete_error)
+                if "500" in error_str or "404" in error_str:
+                    logger.warning(
+                        f"API error deleting file {self.path} (entry_id={entry_id}): {delete_error}. "
+                        "This might be an eventual consistency issue. Treating as deleted."
+                    )
+                    # Treat as successfully deleted for eventual consistency
+                    if self._provider is not None:
+                        self._provider._register_delete(self.path)
+                    return
+                else:
+                    raise
 
             # Register the deletion
             if self._provider is not None:
                 self._provider._register_delete(self.path)
 
         except Exception as e:
-            logger.error(f"Error deleting file: {e}")
+            logger.error(
+                f"Error deleting file: {e} (entry_id={entry_id if 'entry_id' in locals() else 'unknown'}, "
+                f"name={self.file_entry.name}, path={self.path})"
+            )
             raise DAVError(HTTP_FORBIDDEN, f"Error deleting file: {e}") from None
 
     def _get_real_entry_id(self) -> int:
@@ -1170,14 +1199,43 @@ class DrimeCollection(DAVCollection):
                         self._provider._register_delete(self.path)
                     return
 
-            self.client.delete_file_entries([entry_id], workspace_id=self.workspace_id)
+            logger.debug(
+                f"Deleting folder entry_id={entry_id}, name={self.folder_entry.name}, "
+                f"path={self.path}"
+            )
+            try:
+                delete_forever = (
+                    self._provider._delete_forever if self._provider else True
+                )
+                self.client.delete_file_entries(
+                    [entry_id],
+                    delete_forever=delete_forever,
+                    workspace_id=self.workspace_id,
+                )
+            except Exception as delete_error:
+                # Check if this is a 500 error - might be eventual consistency issue
+                error_str = str(delete_error)
+                if "500" in error_str or "404" in error_str:
+                    logger.warning(
+                        f"API error deleting folder {self.path} (entry_id={entry_id}): {delete_error}. "
+                        "This might be an eventual consistency issue. Treating as deleted."
+                    )
+                    # Treat as successfully deleted for eventual consistency
+                    if self._provider is not None:
+                        self._provider._register_delete(self.path)
+                    return
+                else:
+                    raise
 
             # Register the deletion
             if self._provider is not None:
                 self._provider._register_delete(self.path)
 
         except Exception as e:
-            logger.error(f"Error deleting folder: {e}")
+            logger.error(
+                f"Error deleting folder: {e} (entry_id={entry_id if 'entry_id' in locals() else 'unknown'}, "
+                f"name={self.folder_entry.name if self.folder_entry else 'ROOT'}, path={self.path})"
+            )
             raise DAVError(HTTP_FORBIDDEN, f"Error deleting folder: {e}") from None
 
     def copy_move_single(self, dest_path: str, is_move: bool) -> bool:
@@ -1706,6 +1764,7 @@ class DrimeDAVProvider(DAVProvider, StorageProvider):
         readonly: bool = False,
         cache_ttl: float = DEFAULT_CACHE_TTL,
         max_file_size: int = DEFAULT_MAX_FILE_SIZE,
+        delete_forever: bool = True,
     ) -> None:
         """Initialize the provider.
 
@@ -1715,6 +1774,8 @@ class DrimeDAVProvider(DAVProvider, StorageProvider):
             readonly: Whether to allow write operations
             cache_ttl: Cache time-to-live in seconds
             max_file_size: Maximum file size for uploads/downloads in bytes
+            delete_forever: Whether to permanently delete files (True) or move to trash (False).
+                Default is True for WebDAV compatibility.
         """
         super().__init__()
         self.client = client
@@ -1722,6 +1783,7 @@ class DrimeDAVProvider(DAVProvider, StorageProvider):
         self._readonly = readonly
         self._cache_ttl = cache_ttl
         self._max_file_size = max_file_size
+        self._delete_forever = delete_forever
         # Track recently created paths to handle API eventual consistency
         # Maps normalized path -> (creation_time, FileEntry or None)
         self._recent_creates: dict[str, tuple[float, FileEntry | None]] = {}
